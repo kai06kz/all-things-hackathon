@@ -2,6 +2,13 @@ import streamlit as st
 from google import genai
 import chromadb
 from dotenv import load_dotenv
+import os
+from google.cloud import firestore
+
+if os.path.exists("service_account.json"):
+    db = firestore.Client.from_service_account_json("service_account.json")
+else:
+    db = firestore.Client()
 
 load_dotenv()
 
@@ -85,6 +92,16 @@ User Question: {prompt}
                 
                 st.session_state.messages.append({"role": "assistant", "content": bot_reply})
                 st.session_state.last_evidence = list(zip(docs, metas))
+                
+                # Save to Firestore
+                try:
+                    db.collection("chat_history").add({
+                        "question": prompt,  # Fixed variable name
+                        "answer": response.text,
+                        "timestamp": firestore.SERVER_TIMESTAMP
+                    })
+                except Exception as e:
+                    print(f"Firestore logging skipped: {e}")
 
 with col_evidence:
     st.subheader("📑 Provenance Evidence")
