@@ -8,6 +8,7 @@ import streamlit as st
 from google.genai.errors import ClientError
 
 from rag.agent import KnowledgeChat, create_knowledge_chat
+from rag.gmail import GmailSearch
 
 ROOT_DIR = Path(__file__).parent
 KNOWLEDGE_DIR = ROOT_DIR / "my_knowledge_folder"
@@ -15,9 +16,9 @@ KNOWLEDGE_DIR = ROOT_DIR / "my_knowledge_folder"
 st.set_page_config(page_title="Knowledge RAG", page_icon=":material/menu_book:", layout="wide")
 
 
-def get_chat(api_key: str) -> KnowledgeChat:
+def get_chat(api_key: str, gmail: GmailSearch | None) -> KnowledgeChat:
     if "knowledge_chat" not in st.session_state:
-        chat = create_knowledge_chat(KNOWLEDGE_DIR, api_key)
+        chat = create_knowledge_chat(KNOWLEDGE_DIR, api_key, gmail)
         asyncio.run(chat.initialize())
         st.session_state.knowledge_chat = chat
     return st.session_state.knowledge_chat
@@ -53,23 +54,39 @@ def main() -> None:
                 help="Used only for this browser session and never saved by the app.",
             )
             st.caption("Create a key in your own Google AI Studio project.")
+
+            st.divider()
+            st.subheader("Connect Gmail (optional)")
+            gmail_addr = st.text_input("Gmail address", help="Leave empty to skip Gmail search.")
+            app_password = st.text_input(
+                "Gmail App Password",
+                type="password",
+                help="A 16-character App Password, held only in this session.",
+            )
+            st.caption("Enable 2-Step Verification, then create an App Password in your Google Account.")
+
             if st.button("Clear session", icon=":material/delete:"):
                 st.session_state.clear()
                 st.rerun()
+
+        credentials = (api_key, gmail_addr, app_password)
         if (
-            st.session_state.get("configured_api_key")
-            and st.session_state.configured_api_key != api_key
+            st.session_state.get("configured_credentials") is not None
+            and st.session_state.configured_credentials != credentials
         ):
-            for key in ("knowledge_chat", "messages", "last_evidence", "indexed_chunk_count"):
-                st.session_state.pop(key, None)
-        st.session_state.configured_api_key = api_key
+            st.session_state.pop("knowledge_chat", None)
+            st.session_state.pop("indexed_chunk_count", None)
+            st.session_state.messages = []
+            st.session_state.last_evidence = []
+        st.session_state.configured_credentials = credentials
+
         render_evidence()
         for message in st.session_state.messages:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
 
         with st.form("question_form", clear_on_submit=True):
-            prompt = st.text_area("Ask about the knowledge base", height=100)
+            prompt = st.text_area("Ask a question", height=100)
             submitted = st.form_submit_button("Ask")
         if not submitted:
             return
@@ -81,13 +98,20 @@ def main() -> None:
             st.error("Enter your Gemini API key in the sidebar before sending a question.")
             return
 
+        gmail: GmailSearch | None = None
+        if gmail_addr.strip() or app_password.strip():
+            if not gmail_addr.strip() or not app_password.strip():
+                st.warning("Enter both a Gmail address and an App Password, or leave both empty.")
+                return
+            gmail = GmailSearch(gmail_addr, app_password)
+
         st.session_state.messages.append({"role": "user", "content": prompt})
         with st.chat_message("user"):
             st.markdown(prompt)
 
         with st.chat_message("assistant", avatar=":material/psychology:"):
-            with st.spinner("Searching the knowledge base..."):
-                chat = get_chat(api_key)
+            with st.spinner("Searching..."):
+                chat = get_chat(api_key, gmail)
                 st.session_state.indexed_chunk_count = chat._index.size
                 reply, evidence = asyncio.run(chat.ask(prompt))
             st.markdown(reply)
@@ -103,8 +127,9 @@ def main() -> None:
             st.info("Create a valid key at https://aistudio.google.com/apikey, then paste it in the sidebar.")
         else:
             st.error(f"Gemini request failed: {error}")
-    except Exception:
+    except Exception as error:
         st.error("The knowledge service is temporarily unavailable. Please try again shortly.")
+        st.exception(error)
 
 
 if __name__ == "__main__":
