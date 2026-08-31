@@ -1,0 +1,4 @@
+google-adk==2.8.0
+google-genai>=1.0.0
+streamlit==1.62.0
+pytest>=8.0.0
