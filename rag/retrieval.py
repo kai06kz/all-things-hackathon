@@ -102,6 +102,24 @@ class KnowledgeIndex:
         return sorted(scored, key=lambda chunk: chunk.score, reverse=True)[:top_k]
 
 
+def count_markdown_chunks(
+    directory: Path,
+    *,
+    chunk_size: int = 1_200,
+    chunk_overlap: int = 200,
+) -> int:
+    """Count how many chunks would be created from a Markdown knowledge directory."""
+    if chunk_size <= 0 or not 0 <= chunk_overlap < chunk_size:
+        raise ValueError("chunk_overlap must be non-negative and smaller than chunk_size.")
+
+    total = 0
+    for path in sorted(directory.rglob("*.md")):
+        if not path.is_file():
+            continue
+        total += len(chunk_text(path.read_text(encoding="utf-8"), chunk_size, chunk_overlap))
+    return total
+
+
 def chunk_text(text: str, chunk_size: int, chunk_overlap: int) -> list[str]:
     """Split non-empty text into overlapping bounded chunks."""
     normalized = " ".join(text.split())

@@ -9,11 +9,18 @@ from google.genai.errors import ClientError
 
 from rag.agent import KnowledgeChat, create_knowledge_chat
 from rag.gmail import GmailSearch
+from rag.retrieval import count_markdown_chunks
 
 ROOT_DIR = Path(__file__).parent
 KNOWLEDGE_DIR = ROOT_DIR / "my_knowledge_folder"
 
 st.set_page_config(page_title="Knowledge RAG", page_icon=":material/menu_book:", layout="wide")
+
+
+@st.cache_data(show_spinner=False)
+def get_indexed_chunk_count() -> int:
+    """Count the local knowledge chunks without requiring an API call."""
+    return count_markdown_chunks(KNOWLEDGE_DIR)
 
 
 def get_chat(api_key: str, gmail: GmailSearch | None) -> KnowledgeChat:
@@ -26,15 +33,26 @@ def get_chat(api_key: str, gmail: GmailSearch | None) -> KnowledgeChat:
 
 def render_evidence() -> None:
     evidence = st.session_state.get("last_evidence", [])
+    gmail_results = st.session_state.get("last_gmail_results", [])
     with st.sidebar:
         st.header("Evidence")
-        st.caption(f"{st.session_state.get('indexed_chunk_count', 0)} indexed chunks")
+        chunk_count = st.session_state.get("indexed_chunk_count", get_indexed_chunk_count())
+        st.caption(f"{chunk_count} indexed chunks")
         if not evidence:
             st.info("Relevant source excerpts will appear here after an answer.")
-            return
-        for chunk in evidence:
-            with st.expander(f"{chunk.filename} | relevance {chunk.score:.2f}"):
-                st.write(chunk.text)
+        else:
+            for chunk in evidence:
+                with st.expander(f"{chunk.filename} | relevance {chunk.score:.2f}"):
+                    st.write(chunk.text)
+
+        if gmail_results:
+            st.subheader("Gmail matches")
+            for email_item in gmail_results:
+                title = email_item.get("subject") or "(no subject)"
+                sender = email_item.get("from") or "(unknown sender)"
+                date = email_item.get("date") or "(no date)"
+                with st.expander(f"{title} | {sender} | {date}"):
+                    st.write(email_item.get("text", ""))
 
 
 def main() -> None:
@@ -45,6 +63,8 @@ def main() -> None:
         st.session_state.messages = []
     if "last_evidence" not in st.session_state:
         st.session_state.last_evidence = []
+    if "last_gmail_results" not in st.session_state:
+        st.session_state.last_gmail_results = []
 
     try:
         with st.sidebar:
@@ -75,10 +95,11 @@ def main() -> None:
             and st.session_state.configured_credentials != credentials
         ):
             st.session_state.pop("knowledge_chat", None)
-            st.session_state.pop("indexed_chunk_count", None)
             st.session_state.messages = []
             st.session_state.last_evidence = []
+            st.session_state.last_gmail_results = []
         st.session_state.configured_credentials = credentials
+        st.session_state.indexed_chunk_count = get_indexed_chunk_count()
 
         render_evidence()
         for message in st.session_state.messages:
@@ -112,12 +133,12 @@ def main() -> None:
         with st.chat_message("assistant", avatar=":material/psychology:"):
             with st.spinner("Searching..."):
                 chat = get_chat(api_key, gmail)
-                st.session_state.indexed_chunk_count = chat._index.size
                 reply, evidence = asyncio.run(chat.ask(prompt))
             st.markdown(reply)
 
         st.session_state.messages.append({"role": "assistant", "content": reply})
         st.session_state.last_evidence = evidence
+        st.session_state.last_gmail_results = chat.gmail_results
         st.rerun()
     except RuntimeError as error:
         st.error(str(error))

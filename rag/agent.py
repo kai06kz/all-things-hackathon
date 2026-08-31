@@ -50,6 +50,7 @@ class KnowledgeChat:
             raise RuntimeError("A Gemini API key is required to run the knowledge agent.")
         self._index = index
         self._evidence: list[KnowledgeChunk] = []
+        self._gmail_results: list[dict[str, str]] = []
         self._gmail = gmail
         self._session_service = InMemorySessionService()
         self._session_id = str(uuid.uuid4())
@@ -94,15 +95,22 @@ class KnowledgeChat:
 
     def search_gmail(self, query: str) -> dict[str, object]:
         """Search the user's Gmail inbox for emails relevant to a question."""
+        self._gmail_results = []
         if self._gmail is None:
             return {"status": "not_configured", "emails": []}
         try:
             emails = self._gmail.search(query)
         except Exception as error:
             return {"status": "error", "message": str(error), "emails": []}
+        self._gmail_results = emails
         if not emails:
             return {"status": "no_results", "emails": []}
         return {"status": "ok", "emails": emails}
+
+    @property
+    def gmail_results(self) -> list[dict[str, str]]:
+        """Most recent Gmail search results from the current turn."""
+        return list(self._gmail_results)
 
     async def ask(self, message: str) -> tuple[str, list[KnowledgeChunk]]:
         self._evidence = []

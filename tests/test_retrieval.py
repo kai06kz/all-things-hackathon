@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from rag.retrieval import KnowledgeIndex, chunk_text, cosine_similarity
+from rag.retrieval import KnowledgeIndex, chunk_text, cosine_similarity, count_markdown_chunks
 
 
 class FakeEmbedder:
@@ -39,6 +39,13 @@ def test_empty_directory_has_no_search_results(tmp_path: Path):
 
     assert index.size == 0
     assert index.search("REST") == []
+
+
+def test_count_markdown_chunks_works_without_embeddings(tmp_path: Path):
+    (tmp_path / "a.md").write_text("REST uses HTTP methods.", encoding="utf-8")
+    (tmp_path / "b.md").write_text("GraphQL uses a typed schema.", encoding="utf-8")
+
+    assert count_markdown_chunks(tmp_path) == 2
 
 
 def test_cosine_similarity_handles_zero_vectors():
